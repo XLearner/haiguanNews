@@ -34,20 +34,12 @@ jobs:
       - name: 安装 Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: 调试环境
+      - name: 验证脚本版本
         run: |
-          echo "=== Node.js 版本 ==="
-          node -v
-          echo "=== npm 版本 ==="
-          npm -v
-          echo "=== 文件列表 ==="
-          ls -la
-          echo "=== node_modules/playwright 是否存在 ==="
-          ls node_modules/playwright/package.json 2>/dev/null && echo "YES" || echo "NO"
-          echo "=== 测试 import playwright ==="
-          node -e "import('playwright').then(() => console.log('OK')).catch(e => console.error(e.message))" 2>&1
-          echo "=== 测试 import fs/promises ==="
-          node -e "import('node:fs/promises').then(() => console.log('OK')).catch(e => console.error(e.message))" 2>&1
+          echo "=== customs-scraper.js MD5 ==="
+          md5sum customs-scraper.js
+          echo "=== waitForSelector 相关行 ==="
+          grep -n "waitForSelector\|timeout.*20000\|ul.news_list" customs-scraper.js || echo "(none found)"
 
       - name: 运行抓取脚本
         run: |
