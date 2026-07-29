@@ -34,8 +34,29 @@ jobs:
       - name: 安装 Playwright Chromium
         run: npx playwright install --with-deps chromium
 
+      - name: 调试环境
+        run: |
+          echo "=== Node.js 版本 ==="
+          node -v
+          echo "=== npm 版本 ==="
+          npm -v
+          echo "=== 文件列表 ==="
+          ls -la
+          echo "=== node_modules/playwright 是否存在 ==="
+          ls node_modules/playwright/package.json 2>/dev/null && echo "YES" || echo "NO"
+          echo "=== 测试 import playwright ==="
+          node -e "import('playwright').then(() => console.log('OK')).catch(e => console.error(e.message))" 2>&1
+          echo "=== 测试 import fs/promises ==="
+          node -e "import('node:fs/promises').then(() => console.log('OK')).catch(e => console.error(e.message))" 2>&1
+
       - name: 运行抓取脚本
-        run: node customs-scraper.js 2>&1
+        run: |
+          set -euo pipefail
+          echo ">>> 脚本开始 $(date)"
+          node customs-scraper.js 2>&1
+          EXIT_CODE=$?
+          echo "<<< 脚本结束 exit_code=$EXIT_CODE"
+          exit $EXIT_CODE
         env:
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
