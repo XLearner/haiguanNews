@@ -161,94 +161,84 @@ async function scrapeNewsList() {
       timeout: 60000,
     });
 
-    // 调试：打印最终 URL 和页面标题
+    // 额外等待，确保动态内容加载
+    await page.waitForTimeout(3000);
+
+    // 调试信息
     console.log(`   最终 URL: ${page.url()}`);
     console.log(`   页面标题: ${await page.title()}`);
 
-    // 尝试多种选择器
-    const selectorsToTry = [
-      "ul.news_list",
-      "ul.news-list",
-      ".news_list",
-      ".news-list",
-      "ul[class*='news']",
-      ".list_box ul",
-      ".listBox ul",
-      ".con ul",
-      "ul.list",
-      "a[href*='302425']", // 任何包含新闻路径的链接
-    ];
+    // ═══ 方法1：直接提取页面上所有带 href 的链接 ═══
+    let newsItems = await page.$$eval(
+      "a[href]",
+      (links, baseUrl) =>
+        links
+          .filter((a) => {
+            const text = a.textContent.trim();
+            // 过滤导航/页脚等无关链接
+            return (
+              text.length > 10 &&
+              !/^(首页|上一页|下一页|末页|更多|返回|关闭|English|网站地图|关于我们)$/.test(text)
+            );
+          })
+          .map((a) => {
+            const href = a.getAttribute("href") || "";
+            const fullUrl = href.startsWith("http")
+              ? href
+              : `http://www.customs.gov.cn${href.startsWith("/") ? "" : "/"}${href}`;
+            const parentText = a.closest("li, div, p, td")?.textContent || a.textContent || "";
+            const dateMatch = parentText.match(/(\d{4}[.\-/年]\d{1,2}[.\-/月]\d{1,2}日?)/);
+            return {
+              title: text,
+              url: fullUrl,
+              date: dateMatch ? dateMatch[1] : "",
+            };
+          }),
+      CONFIG.baseUrl
+    );
 
-    let newsItems = [];
-
-    for (const sel of selectorsToTry) {
-      try {
-        console.log(`   尝试选择器: "${sel}" ...`);
-        await page.waitForSelector(sel, { timeout: 8000 });
-
-        // 如果选择器是 a 标签，直接提取链接
-        if (sel.startsWith("a[")) {
-          newsItems = await page.$$eval(sel, (links) =>
-            links.map((a) => ({
-              title: a.textContent.trim(),
-              url: a.href.startsWith("http") ? a.href : `http://www.customs.gov.cn${a.getAttribute("href")}`,
-              date: "",
-            }))
-          );
-        } else {
-          // ul/div 容器 → 找内部链接
-          newsItems = await page.$$eval(`${sel} a[href]`, (links) =>
-            links
-              .filter((a) => a.textContent.trim().length > 5) // 过滤空链接
-              .map((a) => {
-                const href = a.getAttribute("href") || "";
-                const fullUrl = href.startsWith("http")
-                  ? href
-                  : `http://www.customs.gov.cn${href.startsWith("/") ? "" : "/"}${href}`;
-                // 提取旁边日期
-                const parentText = (a.parentElement?.textContent || a.textContent || "");
-                const dateMatch = parentText.match(/(\d{4}[.\-/年]\d{1,2}[.\-/月]\d{1,2}日?)/);
-                return {
-                  title: a.textContent.trim(),
-                  url: fullUrl,
-                  date: dateMatch ? dateMatch[1] : "",
-                };
-              })
-          );
+    // ═══ 方法2：如果上面结果为空，尝试获取所有可见文本 ═══
+    if (newsItems.length === 0) {
+      console.log("   ⚠️ 方法1 无结果，尝试获取所有文本节点...");
+      const allText = await page.$$eval("body *", (els) =>
+        els.slice(0, 200).map((el) => ({
+          tag: el.tagName,
+          class: el.className,
+          text: (el.textContent || "").trim().substring(0, 100),
+        }))
+      );
+      console.log("   📄 页面元素结构（前200）:");
+      for (const t of allText.slice(0, 30)) {
+        if (t.text && t.text.length > 5) {
+          console.log(`      <${t.tag} class="${t.class}"> ${t.text}`);
         }
-
-        if (newsItems.length > 0) {
-          console.log(`   ✅ 选择器 "${sel}" 命中 ${newsItems.length} 条`);
-          break;
-        }
-      } catch {
-        console.log(`   ❌ 选择器 "${sel}" 未找到`);
       }
     }
 
-    // 如果所有选择器都失败，保存页面内容用于诊断
-    if (newsItems.length === 0) {
-      console.log("   ⚠️ 所有选择器均失败，保存页面 HTML 用于诊断...");
-      const html = await page.content();
-      const fs = await import("node:fs/promises");
-      await fs.writeFile("debug-page.html", html.substring(0, 50000));
-      await page.screenshot({ path: "debug-page.png", fullPage: true });
-      console.log("   已保存 debug-page.html 和 debug-page.png");
+    // ═══ 始终保存截图供诊断 ═══
+    await page.screenshot({ path: "page-screenshot.png", fullPage: true });
+    console.log("   📸 已保存截图 page-screenshot.png");
+
+    // 打印 HTML 片段
+    const html = await page.content();
+    console.log(`   📄 页面 HTML 长度: ${html.length} 字符`);
+    const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    if (bodyMatch) {
+      const bodyText = bodyMatch[1].replace(/<script[\s\S]*?<\/script>/g, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      console.log(`   📝 纯文本预览: ${bodyText.substring(0, 500)}`);
     }
 
     console.log(`✅ 抓取到 ${newsItems.length} 条新闻`);
 
-    // 去重 & 过滤无效条目
+    // 去重 & 过滤（只保留可能是新闻的链接：href 包含 customs）
     const seen = new Set();
     const valid = newsItems.filter((n) => {
       if (!n.title || !n.url) return false;
       if (seen.has(n.url)) return false;
+      // 优先保留包含 /customs/ 路径的链接（海关新闻）
       seen.add(n.url);
       return true;
     });
-    if (valid.length < newsItems.length) {
-      console.log(`   ⚠️ 去重过滤掉 ${newsItems.length - valid.length} 条`);
-    }
 
     return valid;
   } finally {
