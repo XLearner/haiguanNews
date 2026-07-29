@@ -1,0 +1,13 @@
+{
+  "name": "customs-news-scraper",
+  "version": "1.0.0",
+  "description": "每日抓取海关总署新闻发布，写入飞书多维表格",
+  "type": "module",
+  "scripts": {
+    "start": "node customs-scraper.js",
+    "test": "node customs-scraper.js --dry-run"
+  },
+  "dependencies": {
+    "playwright": "^1.45.0"
+  }
+}

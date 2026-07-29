@@ -1,0 +1,48 @@
+name: 海关新闻每日抓取
+
+on:
+  schedule:
+    # 北京时间每天早上 9:00 (UTC 1:00)
+    - cron: "0 1 * * *"
+  workflow_dispatch: # 允许手动触发
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 安装 Playwright 浏览器
+        run: npx playwright install --with-deps chromium
+
+      - name: 运行抓取脚本
+        run: node customs-scraper.js
+        env:
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          BITABLE_APP_TOKEN: ${{ secrets.BITABLE_APP_TOKEN }}
+          BITABLE_TABLE_ID: ${{ secrets.BITABLE_TABLE_ID }}
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          CUSTOMS_NEWS_URL: ${{ secrets.CUSTOMS_NEWS_URL }}
+
+      - name: 上传调试截图（失败时）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshots
+          path: |
+            debug-*.png
+            *.png
+          retention-days: 7
