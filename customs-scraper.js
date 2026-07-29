@@ -371,6 +371,13 @@ async function sendNotification(scraped, added, errors) {
 // ─── 主流程 ───────────────────────────────────────────────
 
 async function main() {
+  // ══════════════════════════════════════════════════════════
+  console.log("══════════════════════════════════════════════");
+  console.log("  VERSION: v3 — selector-free, link-based extraction");
+  console.log("  COMMIT:  ebe0009");
+  console.log("  此版本不使用 waitForSelector");
+  console.log("══════════════════════════════════════════════");
+
   const errors = [];
   let newsItems = [];
   let addedCount = 0;
