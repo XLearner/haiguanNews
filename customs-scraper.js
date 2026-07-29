@@ -161,38 +161,93 @@ async function scrapeNewsList() {
       timeout: 60000,
     });
 
-    // 等待 .news_list 出现
-    await page.waitForSelector("ul.news_list", { timeout: 20000 });
+    // 调试：打印最终 URL 和页面标题
+    console.log(`   最终 URL: ${page.url()}`);
+    console.log(`   页面标题: ${await page.title()}`);
 
-    // 提取新闻条目
-    const newsItems = await page.$$eval("ul.news_list > li", (items) =>
-      items.map((li) => {
-        // 尝试多种方式提取标题和链接
-        const link = li.querySelector("a");
-        const title = link ? link.textContent.trim() : li.textContent.trim();
-        const href = link ? link.getAttribute("href") : "";
+    // 尝试多种选择器
+    const selectorsToTry = [
+      "ul.news_list",
+      "ul.news-list",
+      ".news_list",
+      ".news-list",
+      "ul[class*='news']",
+      ".list_box ul",
+      ".listBox ul",
+      ".con ul",
+      "ul.list",
+      "a[href*='302425']", // 任何包含新闻路径的链接
+    ];
 
-        // 补全相对路径
-        let fullUrl = href || "";
-        if (fullUrl && !fullUrl.startsWith("http")) {
-          fullUrl = "http://www.customs.gov.cn" + (fullUrl.startsWith("/") ? "" : "/") + fullUrl;
+    let newsItems = [];
+
+    for (const sel of selectorsToTry) {
+      try {
+        console.log(`   尝试选择器: "${sel}" ...`);
+        await page.waitForSelector(sel, { timeout: 8000 });
+
+        // 如果选择器是 a 标签，直接提取链接
+        if (sel.startsWith("a[")) {
+          newsItems = await page.$$eval(sel, (links) =>
+            links.map((a) => ({
+              title: a.textContent.trim(),
+              url: a.href.startsWith("http") ? a.href : `http://www.customs.gov.cn${a.getAttribute("href")}`,
+              date: "",
+            }))
+          );
+        } else {
+          // ul/div 容器 → 找内部链接
+          newsItems = await page.$$eval(`${sel} a[href]`, (links) =>
+            links
+              .filter((a) => a.textContent.trim().length > 5) // 过滤空链接
+              .map((a) => {
+                const href = a.getAttribute("href") || "";
+                const fullUrl = href.startsWith("http")
+                  ? href
+                  : `http://www.customs.gov.cn${href.startsWith("/") ? "" : "/"}${href}`;
+                // 提取旁边日期
+                const parentText = (a.parentElement?.textContent || a.textContent || "");
+                const dateMatch = parentText.match(/(\d{4}[.\-/年]\d{1,2}[.\-/月]\d{1,2}日?)/);
+                return {
+                  title: a.textContent.trim(),
+                  url: fullUrl,
+                  date: dateMatch ? dateMatch[1] : "",
+                };
+              })
+          );
         }
 
-        // 尝试提取日期（常见格式：2024-01-15 或 2024.01.15）
-        const text = li.textContent || "";
-        const dateMatch = text.match(/(\d{4}[.\-/年]\d{1,2}[.\-/月]\d{1,2}日?)/);
-        const date = dateMatch ? dateMatch[1] : "";
+        if (newsItems.length > 0) {
+          console.log(`   ✅ 选择器 "${sel}" 命中 ${newsItems.length} 条`);
+          break;
+        }
+      } catch {
+        console.log(`   ❌ 选择器 "${sel}" 未找到`);
+      }
+    }
 
-        return { title, url: fullUrl, date };
-      })
-    );
+    // 如果所有选择器都失败，保存页面内容用于诊断
+    if (newsItems.length === 0) {
+      console.log("   ⚠️ 所有选择器均失败，保存页面 HTML 用于诊断...");
+      const html = await page.content();
+      const fs = await import("node:fs/promises");
+      await fs.writeFile("debug-page.html", html.substring(0, 50000));
+      await page.screenshot({ path: "debug-page.png", fullPage: true });
+      console.log("   已保存 debug-page.html 和 debug-page.png");
+    }
 
     console.log(`✅ 抓取到 ${newsItems.length} 条新闻`);
 
-    // 吐掉无效条目
-    const valid = newsItems.filter((n) => n.title && n.url);
+    // 去重 & 过滤无效条目
+    const seen = new Set();
+    const valid = newsItems.filter((n) => {
+      if (!n.title || !n.url) return false;
+      if (seen.has(n.url)) return false;
+      seen.add(n.url);
+      return true;
+    });
     if (valid.length < newsItems.length) {
-      console.log(`   ⚠️ 过滤掉 ${newsItems.length - valid.length} 条无效条目`);
+      console.log(`   ⚠️ 去重过滤掉 ${newsItems.length - valid.length} 条`);
     }
 
     return valid;
