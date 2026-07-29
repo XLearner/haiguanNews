@@ -128,6 +128,10 @@ async function scrapeNewsList() {
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
       "--disable-gpu",
+      // 关键：不要让网站检测到 headless 模式
+      "--disable-blink-features=AutomationControlled",
+      "--disable-features=IsolateOrigins,site-per-process",
+      "--enable-features=NetworkService,NetworkServiceInProcess",
     ],
   });
 
@@ -136,18 +140,51 @@ async function scrapeNewsList() {
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
     viewport: { width: 1920, height: 1080 },
     locale: "zh-CN",
+    // 模拟真实浏览器特征
+    hasTouch: false,
+    isMobile: false,
+    deviceScaleFactor: 1,
+    // 允许所有权限请求
+    permissions: ["geolocation"],
   });
 
-  // 隐藏自动化痕迹
+  // 更完整的反检测脚本
   await context.addInitScript(() => {
-    Object.defineProperty(navigator, "webdriver", { get: () => false });
-    window.chrome = { runtime: {} };
+    // 隐藏 webdriver 标记
+    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+
+    // 模拟 chrome 对象
+    window.chrome = {
+      runtime: {},
+      loadTimes: function () {},
+      csi: function () {},
+      app: {},
+    };
+
+    // 模拟 plugins
+    Object.defineProperty(navigator, "plugins", {
+      get: () => [1, 2, 3, 4, 5],
+    });
+
+    // 模拟 languages
+    Object.defineProperty(navigator, "languages", {
+      get: () => ["zh-CN", "zh", "en"],
+    });
+
     // 覆盖权限查询
     const originalQuery = window.navigator.permissions.query;
     window.navigator.permissions.query = (parameters) =>
       parameters.name === "notifications"
         ? Promise.resolve({ state: Notification.permission })
         : originalQuery(parameters);
+
+    // 覆盖 headless 检测常用的属性
+    Object.defineProperty(navigator, "hardwareConcurrency", {
+      get: () => 8,
+    });
+    Object.defineProperty(navigator, "deviceMemory", {
+      get: () => 8,
+    });
   });
 
   const page = await context.newPage();
@@ -155,14 +192,31 @@ async function scrapeNewsList() {
   try {
     console.log(`📡 访问: ${CONFIG.newsListUrl}`);
 
-    // 访问页面，等待 JS 挑战自动完成
+    // 访问页面
     await page.goto(CONFIG.newsListUrl, {
-      waitUntil: "networkidle",
-      timeout: 60000,
+      waitUntil: "domcontentloaded",
+      timeout: 30000,
     });
 
-    // 额外等待，确保动态内容加载
-    await page.waitForTimeout(3000);
+    // JS 挑战需要时间执行 → 等待页面跳转到真实内容
+    // 挑战成功后会设置 cookie 并重定向，页面 URL 不变但内容会替换
+    console.log("   ⏳ 等待 JS 挑战完成...");
+    let challengePassed = false;
+    for (let i = 0; i < 20; i++) {
+      await page.waitForTimeout(2000);
+      const bodyText = await page.evaluate(() => document.body.innerText || "");
+      const hasRealContent = bodyText.length > 100;
+      console.log(`   [${i + 1}/20] 页面文本长度: ${bodyText.length}${hasRealContent ? " ✅" : ""}`);
+
+      if (hasRealContent) {
+        challengePassed = true;
+        break;
+      }
+    }
+
+    if (!challengePassed) {
+      console.log("   ❌ JS 挑战可能未通过，但继续尝试提取...");
+    }
 
     // 调试信息
     console.log(`   最终 URL: ${page.url()}`);
