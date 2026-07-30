@@ -48,8 +48,17 @@ jobs:
         run: |
           set -euo pipefail
           echo ">>> 脚本开始 $(date)"
-          xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" node customs-scraper.js 2>&1
+          # 启动虚拟显示器
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1920x1080x24 -ac +extension RANDR &
+          XVFB_PID=$!
+          echo "Xvfb PID=$XVFB_PID DISPLAY=$DISPLAY"
+          sleep 1
+          # 运行脚本
+          node customs-scraper.js 2>&1
           EXIT_CODE=$?
+          # 清理
+          kill $XVFB_PID 2>/dev/null || true
           echo "<<< 脚本结束 exit_code=$EXIT_CODE"
           exit $EXIT_CODE
         env:
