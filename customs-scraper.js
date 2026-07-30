@@ -111,7 +111,10 @@ async function feishuApi(path, options = {}) {
   });
   const data = await res.json();
   if (data.code !== 0) {
-    throw new Error(`飞书 API 错误 [${path}]: ${data.msg} (code=${data.code})`);
+    const hint = data.code === 91403
+      ? "\n💡 提示: 请确认 1) 已开通 bitable:app 权限 2) 已「发布新版本」使权限生效 3) 多维表格已添加此应用为协作者"
+      : "";
+    throw new Error(`飞书 API [${data.code}] ${data.msg}${hint}`);
   }
   return data;
 }

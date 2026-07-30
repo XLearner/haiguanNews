@@ -49,13 +49,6 @@ jobs:
           # Playwright 仍需要其内部协议库
           npx playwright install-deps chromium 2>/dev/null || true
 
-      - name: 验证脚本版本
-        run: |
-          echo "=== customs-scraper.js MD5 ==="
-          md5sum customs-scraper.js
-          echo "=== waitForSelector 相关行 ==="
-          grep -n "waitForSelector\|timeout.*20000\|ul.news_list" customs-scraper.js || echo "(none found)"
-
       - name: 运行抓取脚本
         run: |
           set -euo pipefail
