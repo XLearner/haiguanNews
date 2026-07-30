@@ -223,12 +223,65 @@ async function scrapeNewsList() {
 
     // 去重
     const seen = new Set();
-    return newsItems.filter((n) => {
+    const listItems = newsItems.filter((n) => {
       if (!n.title || !n.url) return false;
       if (seen.has(n.url)) return false;
       seen.add(n.url);
       return true;
     });
+
+    // ═══ 逐篇抓取正文内容 ═══
+    console.log(`\n📰 开始抓取正文内容 (共 ${listItems.length} 篇)...`);
+    for (let i = 0; i < listItems.length; i++) {
+      const item = listItems[i];
+      console.log(`   [${i + 1}/${listItems.length}] ${item.title.substring(0, 40)}...`);
+      try {
+        await page.goto(item.url, {
+          waitUntil: "domcontentloaded",
+          timeout: 20000,
+        });
+        await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+        await page.waitForTimeout(1000);
+
+        // 尝试多个常见正文选择器
+        item.content = await page.$$eval(
+          [
+            ".article_content", "#article_content", ".article-content",
+            ".content", ".main_content", ".text_content",
+            ".TRS_Editor", ".Custom_UnionStyle",
+            "article", ".news_content", ".detail_content",
+          ].join(","),
+          (els) => {
+            // 取第一个有实质内容的
+            for (const el of els) {
+              const text = (el.textContent || "").trim();
+              if (text.length > 100) return text;
+            }
+            return "";
+          }
+        );
+
+        // 如果选择器都没命中，尝试获取 body 中最大文本块
+        if (!item.content) {
+          item.content = await page.$$eval(
+            "p, div.paragraph, .section",
+            (els) => {
+              const texts = els
+                .map((el) => (el.textContent || "").trim())
+                .filter((t) => t.length > 50);
+              return texts.join("\n").substring(0, 5000);
+            }
+          );
+        }
+
+        console.log(`      正文: ${item.content.length} 字符`);
+      } catch (err) {
+        console.log(`      ⚠️ 抓取失败: ${err.message}`);
+        item.content = "";
+      }
+    }
+
+    return listItems;
   } finally {
     await browser.close();
     console.log("🔒 浏览器已关闭");
@@ -297,8 +350,8 @@ async function batchCreateRecords(records) {
           时间: r.date || "",
           标题: r.title,
           来源: "海关总署",
-          内容: { link: r.url, text: r.title },
-          摘要: "",
+          内容: r.content || "",
+          摘要: r.url, // 原文链接放摘要，方便点击
         },
       })),
     };
