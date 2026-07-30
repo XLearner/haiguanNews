@@ -243,35 +243,28 @@ async function scrapeNewsList() {
         await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
         await page.waitForTimeout(1000);
 
-        // 尝试多个常见正文选择器
-        item.content = await page.$$eval(
-          [
-            ".article_content", "#article_content", ".article-content",
-            ".content", ".main_content", ".text_content",
-            ".TRS_Editor", ".Custom_UnionStyle",
-            "article", ".news_content", ".detail_content",
-          ].join(","),
-          (els) => {
-            // 取第一个有实质内容的
-            for (const el of els) {
-              const text = (el.textContent || "").trim();
-              if (text.length > 100) return text;
-            }
-            return "";
-          }
-        );
+        // 从 .news_detail_con 提取正文（含图片转 Markdown）
+        item.content = await page.$eval(".news_detail_con", (container, baseUrl) => {
+          // 克隆节点避免修改原始 DOM
+          const clone = container.cloneNode(true);
 
-        // 如果选择器都没命中，尝试获取 body 中最大文本块
+          // 图片 → Markdown 格式
+          clone.querySelectorAll("img").forEach((img) => {
+            const src = img.getAttribute("src") || "";
+            const alt = img.getAttribute("alt") || "";
+            const fullSrc = src.startsWith("http") ? src : baseUrl + (src.startsWith("/") ? "" : "/") + src;
+            const md = `\n![${alt}](${fullSrc})\n`;
+            img.replaceWith(document.createTextNode(md));
+          });
+
+          return clone.textContent?.trim() || "";
+        }, CONFIG.baseUrl).catch(() => "");
+
+        // 兜底：选择器没命中
         if (!item.content) {
-          item.content = await page.$$eval(
-            "p, div.paragraph, .section",
-            (els) => {
-              const texts = els
-                .map((el) => (el.textContent || "").trim())
-                .filter((t) => t.length > 50);
-              return texts.join("\n").substring(0, 5000);
-            }
-          );
+          item.content = await page.$eval("body", (body) => {
+            return (body.textContent || "").trim().substring(0, 5000);
+          }).catch(() => "");
         }
 
         console.log(`      正文: ${item.content.length} 字符`);
