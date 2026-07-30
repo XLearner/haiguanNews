@@ -223,12 +223,24 @@ async function scrapeNewsList() {
 
     // 去重
     const seen = new Set();
-    const listItems = newsItems.filter((n) => {
+    let listItems = newsItems.filter((n) => {
       if (!n.title || !n.url) return false;
       if (seen.has(n.url)) return false;
       seen.add(n.url);
       return true;
     });
+
+    // ═══ 仅保留当天新闻 ═══
+    const now = new Date();
+    const todayFormats = [
+      `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`,
+      `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`,
+    ];
+    listItems = listItems.filter((n) => {
+      if (!n.date) return true; // 没有日期的保留（避免误杀）
+      return todayFormats.some((fmt) => n.date.includes(fmt));
+    });
+    console.log(`   📅 当天过滤后: ${listItems.length} 条 (日期匹配: ${todayFormats[0]})`);
 
     // ═══ 逐篇抓取正文内容 ═══
     console.log(`\n📰 开始抓取正文内容 (共 ${listItems.length} 篇)...`);
