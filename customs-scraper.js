@@ -230,6 +230,12 @@ async function scrapeNewsList() {
       return true;
     });
 
+    // 调试：打印前几条的日期
+    console.log("   📋 前5条数据预览:");
+    listItems.slice(0, 5).forEach((n, i) => {
+      console.log(`      [${i + 1}] date="${n.date}" title="${n.title.substring(0, 40)}"`);
+    });
+
     // ═══ 仅保留当天新闻 ═══
     const now = new Date();
     const todayFormats = [
@@ -240,7 +246,7 @@ async function scrapeNewsList() {
       if (!n.date) return true; // 没有日期的保留（避免误杀）
       return todayFormats.some((fmt) => n.date.includes(fmt));
     });
-    console.log(`   📅 当天过滤后: ${listItems.length} 条 (日期匹配: ${todayFormats[0]})`);
+    console.log(`   📅 当天过滤后: ${listItems.length} 条 (${todayFormats[0]})`);
 
     // ═══ 逐篇抓取正文内容 ═══
     console.log(`\n📰 开始抓取正文内容 (共 ${listItems.length} 篇)...`);
