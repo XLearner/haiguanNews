@@ -257,12 +257,11 @@ async function getExistingUrls() {
     );
 
     for (const record of data.data?.items || []) {
-      // 尝试 "链接" 字段（可能是文本或 URL 类型）
+      // 从「内容」(URL字段) 或「标题」提取去重标识
       const urlField =
+        record.fields["内容"] ||
         record.fields["链接"] ||
         record.fields["url"] ||
-        record.fields["URL"] ||
-        record.fields["新闻链接"] ||
         "";
       if (urlField) {
         // 飞书 URL 字段可能是 { link: "...", text: "..." } 对象
@@ -295,10 +294,11 @@ async function batchCreateRecords(records) {
     const body = {
       records: batch.map((r) => ({
         fields: {
+          时间: r.date || "",
           标题: r.title,
-          链接: { link: r.url, text: r.title }, // URL 字段类型用对象
-          发布日期: r.date || "",
           来源: "海关总署",
+          内容: { link: r.url, text: r.title },
+          摘要: "",
         },
       })),
     };
