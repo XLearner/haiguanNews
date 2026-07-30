@@ -346,12 +346,20 @@ async function batchCreateRecords(records) {
     const batch = records.slice(i, i + BATCH_SIZE);
     const body = {
       records: batch.map((r) => ({
+        // 日期字符串 → 毫秒时间戳（飞书 DateTime 字段要求）
+        let dateTs = 0;
+        if (r.date) {
+          const normalized = r.date.replace(/[年月]/g, "-").replace(/[日]/g, "").replace(/\./g, "-");
+          const parsed = Date.parse(normalized);
+          dateTs = Number.isNaN(parsed) ? 0 : parsed;
+        }
+
         fields: {
-          时间: r.date || "",
+          ...(dateTs ? { 时间: dateTs } : {}),
           标题: r.title,
           来源: "海关总署",
           内容: r.content || "",
-          摘要: r.url, // 原文链接放摘要，方便点击
+          摘要: r.url,
         },
       })),
     };
