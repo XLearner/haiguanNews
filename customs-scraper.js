@@ -8,11 +8,11 @@
  * 正式运行：  node customs-scraper.js
  */
 
-import { chromium } from "playwright-extra";
+import { chromium, firefox } from "playwright-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
 
-// 启用 stealth 插件（绕过反爬检测的关键）
 chromium.use(StealthPlugin());
+firefox.use(StealthPlugin());
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -122,17 +122,15 @@ async function feishuApi(path, options = {}) {
 
 // ─── 1. 抓取新闻列表 ─────────────────────────────────────
 
-async function scrapeNewsList() {
-  console.log("🌐 启动浏览器 ...");
+async function tryOneBrowser(launcher, label) {
+  console.log(`🌐 启动 ${label} ...`);
 
-  // Stealth 插件已处理反检测，只需基础配置
-  const browser = await chromium.launch({
+  const browser = await launcher.launch({
     headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-    ],
+    args:
+      label === "Firefox"
+        ? ["--no-sandbox"]
+        : ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });
 
   const context = await browser.newContext({
@@ -142,116 +140,101 @@ async function scrapeNewsList() {
 
   const page = await context.newPage();
 
+  // 捕获控制台
+  const consoleLogs = [];
+  page.on("console", (msg) => consoleLogs.push(`[${msg.type()}] ${msg.text()}`));
+  page.on("pageerror", (err) => consoleLogs.push(`[PAGE_ERR] ${err.message}`));
+
   try {
     console.log(`📡 访问: ${CONFIG.newsListUrl}`);
 
-    // 访问页面
     await page.goto(CONFIG.newsListUrl, {
       waitUntil: "domcontentloaded",
       timeout: 30000,
     });
 
-    // JS 挑战需要时间执行 → 等待页面跳转到真实内容
-    // 挑战成功后会设置 cookie 并重定向，页面 URL 不变但内容会替换
-    console.log("   ⏳ 等待 JS 挑战完成...");
-    let challengePassed = false;
-    for (let i = 0; i < 20; i++) {
+    const initialHtml = await page.content();
+    console.log(`   初始 HTML: ${initialHtml.length} 字符`);
+
+    // 等待 JS 挑战
+    console.log("   ⏳ 等待 JS 挑战...");
+    let bodyText = "";
+    for (let i = 0; i < 15; i++) {
       await page.waitForTimeout(2000);
-      const bodyText = await page.evaluate(() => document.body.innerText || "");
-      const hasRealContent = bodyText.length > 100;
-      console.log(`   [${i + 1}/20] 页面文本长度: ${bodyText.length}${hasRealContent ? " ✅" : ""}`);
-
-      if (hasRealContent) {
-        challengePassed = true;
-        break;
-      }
+      bodyText = await page.evaluate(() => document.body.innerText || "");
+      if (bodyText.length > 100) break;
+      console.log(`   [${i + 1}/15] 文本: ${bodyText.length}`);
     }
 
-    if (!challengePassed) {
-      console.log("   ❌ JS 挑战可能未通过，但继续尝试提取...");
+    // 控制台日志
+    if (consoleLogs.length > 0) {
+      console.log(`   📜 控制台 (${consoleLogs.length} 条):`);
+      consoleLogs.slice(0, 8).forEach((l) => console.log(`      ${l.substring(0, 200)}`));
     }
 
-    // 调试信息
-    console.log(`   最终 URL: ${page.url()}`);
-    console.log(`   页面标题: ${await page.title()}`);
+    if (bodyText.length <= 100) {
+      console.log(`   ❌ ${label} 挑战未通过 (文本=${bodyText.length})`);
+      return null;
+    }
 
-    // ═══ 方法1：直接提取页面上所有带 href 的链接 ═══
-    let newsItems = await page.$$eval(
-      "a[href]",
-      (links, baseUrl) =>
-        links
-          .filter((a) => {
-            const text = a.textContent.trim();
-            // 过滤导航/页脚等无关链接
-            return (
-              text.length > 10 &&
-              !/^(首页|上一页|下一页|末页|更多|返回|关闭|English|网站地图|关于我们)$/.test(text)
-            );
-          })
-          .map((a) => {
-            const href = a.getAttribute("href") || "";
-            const fullUrl = href.startsWith("http")
-              ? href
-              : `http://www.customs.gov.cn${href.startsWith("/") ? "" : "/"}${href}`;
-            const parentText = a.closest("li, div, p, td")?.textContent || a.textContent || "";
-            const dateMatch = parentText.match(/(\d{4}[.\-/年]\d{1,2}[.\-/月]\d{1,2}日?)/);
-            return {
-              title: text,
-              url: fullUrl,
-              date: dateMatch ? dateMatch[1] : "",
-            };
-          }),
-      CONFIG.baseUrl
+    console.log(`   ✅ ${label} 挑战通过！文本长度=${bodyText.length}`);
+
+    // 提取链接
+    const newsItems = await page.$$eval("a[href]", (links) =>
+      links
+        .filter((a) => a.textContent.trim().length > 10)
+        .map((a) => {
+          const href = a.getAttribute("href") || "";
+          const fullUrl = href.startsWith("http")
+            ? href
+            : `http://www.customs.gov.cn${href.startsWith("/") ? "" : "/"}${href}`;
+          const parentText = a.closest("li, div, p, td")?.textContent || "";
+          const dateMatch = parentText.match(/(\d{4}[.\-/年]\d{1,2}[.\-/月]\d{1,2}日?)/);
+          return {
+            title: a.textContent.trim(),
+            url: fullUrl,
+            date: dateMatch ? dateMatch[1] : "",
+          };
+        })
     );
 
-    // ═══ 方法2：如果上面结果为空，尝试获取所有可见文本 ═══
-    if (newsItems.length === 0) {
-      console.log("   ⚠️ 方法1 无结果，尝试获取所有文本节点...");
-      const allText = await page.$$eval("body *", (els) =>
-        els.slice(0, 200).map((el) => ({
-          tag: el.tagName,
-          class: el.className,
-          text: (el.textContent || "").trim().substring(0, 100),
-        }))
-      );
-      console.log("   📄 页面元素结构（前200）:");
-      for (const t of allText.slice(0, 30)) {
-        if (t.text && t.text.length > 5) {
-          console.log(`      <${t.tag} class="${t.class}"> ${t.text}`);
-        }
-      }
-    }
+    console.log(`   提取到 ${newsItems.length} 个链接`);
 
-    // ═══ 始终保存截图供诊断 ═══
-    await page.screenshot({ path: "page-screenshot.png", fullPage: true });
-    console.log("   📸 已保存截图 page-screenshot.png");
-
-    // 打印 HTML 片段
-    const html = await page.content();
-    console.log(`   📄 页面 HTML 长度: ${html.length} 字符`);
-    const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-    if (bodyMatch) {
-      const bodyText = bodyMatch[1].replace(/<script[\s\S]*?<\/script>/g, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-      console.log(`   📝 纯文本预览: ${bodyText.substring(0, 500)}`);
-    }
-
-    console.log(`✅ 抓取到 ${newsItems.length} 条新闻`);
-
-    // 去重 & 过滤（只保留可能是新闻的链接：href 包含 customs）
+    // 去重
     const seen = new Set();
     const valid = newsItems.filter((n) => {
       if (!n.title || !n.url) return false;
       if (seen.has(n.url)) return false;
-      // 优先保留包含 /customs/ 路径的链接（海关新闻）
       seen.add(n.url);
       return true;
     });
 
+    await page.screenshot({ path: `page-${label.toLowerCase()}.png`, fullPage: true });
     return valid;
   } finally {
     await browser.close();
-    console.log("🔒 浏览器已关闭");
+    console.log(`🔒 ${label} 已关闭`);
   }
+}
+
+async function scrapeNewsList() {
+  // 先试 Firefox（对部分中国网站 WAF 更友好）
+  let items = await tryOneBrowser(firefox, "Firefox");
+
+  // Firefox 失败则试 Chromium
+  if (!items) {
+    console.log("\n🔄 Firefox 失败，尝试 Chromium...");
+    items = await tryOneBrowser(chromium, "Chromium");
+  }
+
+  if (!items || items.length === 0) {
+    // 全部失败，保存诊断信息
+    console.log("\n❌ 所有浏览器均失败");
+    return [];
+  }
+
+  console.log(`\n✅ 成功抓取 ${items.length} 条新闻`);
+  return items;
 }
 
 // ─── 2. 飞书多维表格去重 & 写入 ───────────────────────────
