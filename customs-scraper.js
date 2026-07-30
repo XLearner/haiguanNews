@@ -200,8 +200,8 @@ async function scrapeNewsList() {
     await page.screenshot({ path: "page-screenshot.png", fullPage: true });
     console.log("   📸 已保存截图");
 
-    // 提取所有链接
-    const newsItems = await page.$$eval("a[href]", (links) =>
+    // 仅在 #customs_con 范围内提取链接
+    const newsItems = await page.$$eval("#customs_con a[href]", (links) =>
       links
         .filter((a) => a.textContent.trim().length > 10)
         .map((a) => {
