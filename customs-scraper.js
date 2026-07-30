@@ -121,14 +121,15 @@ async function feishuApi(path, options = {}) {
 async function scrapeNewsList() {
   console.log("🌐 启动 Chromium ...");
 
-  // 使用非 headless 模式 + xvfb 虚拟显示器，绕过反爬指纹检测
+  // 使用 Google Chrome（非 Chromium）+ xvfb，指纹更接近真实用户
   const browser = await chromium.launch({
     headless: false,
+    channel: "chrome", // 使用系统安装的 Google Chrome
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
-      "--disable-gpu",
+      "--disable-blink-features=AutomationControlled",
     ],
   });
 

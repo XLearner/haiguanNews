@@ -23,19 +23,31 @@ jobs:
         with:
           node-version: "22"
 
-      - name: 安装系统依赖（Playwright + xvfb）
+      - name: 安装系统依赖 & Google Chrome
         run: |
           sudo apt-get update -qq
+          # Playwright 依赖
           sudo apt-get install -y -qq xvfb \
             libnss3 libnspr4 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \
             libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
             libgbm1 libpango-1.0-0 libcairo2 libasound2t64 2>/dev/null || true
+          # 安装 Google Chrome (非 Chromium)
+          if ! command -v google-chrome &> /dev/null; then
+            echo "安装 Google Chrome..."
+            wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+            sudo dpkg -i /tmp/chrome.deb 2>/dev/null || sudo apt-get install -f -y -qq
+          fi
+          google-chrome --version
 
       - name: 安装 Node 依赖
         run: npm install
 
-      - name: 安装 Playwright Chromium
-        run: npx playwright install --with-deps chromium
+      - name: 验证 Chrome 可用
+        run: |
+          google-chrome --version
+          echo "Chrome 路径: $(which google-chrome)"
+          # Playwright 仍需要其内部协议库
+          npx playwright install-deps chromium 2>/dev/null || true
 
       - name: 验证脚本版本
         run: |
