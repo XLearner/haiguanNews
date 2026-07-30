@@ -8,11 +8,7 @@
  * 正式运行：  node customs-scraper.js
  */
 
-import { chromium, firefox } from "playwright-extra";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
-
-chromium.use(StealthPlugin());
-firefox.use(StealthPlugin());
+import { chromium } from "playwright";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -122,15 +118,12 @@ async function feishuApi(path, options = {}) {
 
 // ─── 1. 抓取新闻列表 ─────────────────────────────────────
 
-async function tryOneBrowser(launcher, label) {
-  console.log(`🌐 启动 ${label} ...`);
+async function scrapeNewsList() {
+  console.log("🌐 启动 Chromium ...");
 
-  const browser = await launcher.launch({
+  const browser = await chromium.launch({
     headless: true,
-    args:
-      label === "Firefox"
-        ? ["--no-sandbox"]
-        : ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });
 
   const context = await browser.newContext({
@@ -140,46 +133,51 @@ async function tryOneBrowser(launcher, label) {
 
   const page = await context.newPage();
 
-  // 捕获控制台
+  // 捕获控制台日志
   const consoleLogs = [];
   page.on("console", (msg) => consoleLogs.push(`[${msg.type()}] ${msg.text()}`));
-  page.on("pageerror", (err) => consoleLogs.push(`[PAGE_ERR] ${err.message}`));
+  page.on("pageerror", (err) => consoleLogs.push(`[ERR] ${err.message}`));
 
   try {
     console.log(`📡 访问: ${CONFIG.newsListUrl}`);
 
+    // 第一步：加载挑战页面（domcontentloaded 确保 JS 挑战脚本已加载）
     await page.goto(CONFIG.newsListUrl, {
       waitUntil: "domcontentloaded",
       timeout: 30000,
     });
 
-    const initialHtml = await page.content();
-    console.log(`   初始 HTML: ${initialHtml.length} 字符`);
+    console.log("   ⏳ JS 挑战脚本已加载，等待挑战完成并刷新页面...");
 
-    // 等待 JS 挑战
-    console.log("   ⏳ 等待 JS 挑战...");
-    let bodyText = "";
-    for (let i = 0; i < 15; i++) {
-      await page.waitForTimeout(2000);
-      bodyText = await page.evaluate(() => document.body.innerText || "");
-      if (bodyText.length > 100) break;
-      console.log(`   [${i + 1}/15] 文本: ${bodyText.length}`);
+    // 第二步：等待挑战完成 → 网络空闲（挑战完成后不会再有新请求）
+    try {
+      await page.waitForLoadState("networkidle", { timeout: 45000 });
+    } catch {
+      console.log("   ⚠️ networkidle 超时，继续尝试...");
     }
 
-    // 控制台日志
+    // 额外缓冲
+    await page.waitForTimeout(2000);
+
+    // 第三步：检查是否成功
+    const finalUrl = page.url();
+    const html = await page.content();
+    const bodyText = await page.evaluate(() => document.body.innerText || "");
+    console.log(`   最终 URL: ${finalUrl}`);
+    console.log(`   HTML 长度: ${html.length} 字符`);
+    console.log(`   可见文本: ${bodyText.length} 字符`);
+
+    // 打印控制台日志
     if (consoleLogs.length > 0) {
       console.log(`   📜 控制台 (${consoleLogs.length} 条):`);
-      consoleLogs.slice(0, 8).forEach((l) => console.log(`      ${l.substring(0, 200)}`));
+      consoleLogs.slice(0, 8).forEach((l) => console.log(`      ${l.substring(0, 250)}`));
     }
 
-    if (bodyText.length <= 100) {
-      console.log(`   ❌ ${label} 挑战未通过 (文本=${bodyText.length})`);
-      return null;
-    }
+    // 保存截图
+    await page.screenshot({ path: "page-screenshot.png", fullPage: true });
+    console.log("   📸 已保存截图");
 
-    console.log(`   ✅ ${label} 挑战通过！文本长度=${bodyText.length}`);
-
-    // 提取链接
+    // 提取所有链接
     const newsItems = await page.$$eval("a[href]", (links) =>
       links
         .filter((a) => a.textContent.trim().length > 10)
@@ -198,43 +196,20 @@ async function tryOneBrowser(launcher, label) {
         })
     );
 
-    console.log(`   提取到 ${newsItems.length} 个链接`);
+    console.log(`✅ 提取到 ${newsItems.length} 个链接`);
 
     // 去重
     const seen = new Set();
-    const valid = newsItems.filter((n) => {
+    return newsItems.filter((n) => {
       if (!n.title || !n.url) return false;
       if (seen.has(n.url)) return false;
       seen.add(n.url);
       return true;
     });
-
-    await page.screenshot({ path: `page-${label.toLowerCase()}.png`, fullPage: true });
-    return valid;
   } finally {
     await browser.close();
-    console.log(`🔒 ${label} 已关闭`);
+    console.log("🔒 浏览器已关闭");
   }
-}
-
-async function scrapeNewsList() {
-  // 先试 Firefox（对部分中国网站 WAF 更友好）
-  let items = await tryOneBrowser(firefox, "Firefox");
-
-  // Firefox 失败则试 Chromium
-  if (!items) {
-    console.log("\n🔄 Firefox 失败，尝试 Chromium...");
-    items = await tryOneBrowser(chromium, "Chromium");
-  }
-
-  if (!items || items.length === 0) {
-    // 全部失败，保存诊断信息
-    console.log("\n❌ 所有浏览器均失败");
-    return [];
-  }
-
-  console.log(`\n✅ 成功抓取 ${items.length} 条新闻`);
-  return items;
 }
 
 // ─── 2. 飞书多维表格去重 & 写入 ───────────────────────────

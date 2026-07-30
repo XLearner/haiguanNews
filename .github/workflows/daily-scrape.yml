@@ -34,8 +34,8 @@ jobs:
       - name: 安装 Node 依赖
         run: npm install
 
-      - name: 安装 Playwright 浏览器
-        run: npx playwright install --with-deps chromium firefox
+      - name: 安装 Playwright Chromium
+        run: npx playwright install --with-deps chromium
 
       - name: 验证脚本版本
         run: |

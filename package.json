@@ -8,8 +8,6 @@
     "test": "node customs-scraper.js --dry-run"
   },
   "dependencies": {
-    "playwright": "^1.45.0",
-    "playwright-extra": "^4.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
+    "playwright": "^1.45.0"
   }
 }
