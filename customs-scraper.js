@@ -236,17 +236,17 @@ async function scrapeNewsList() {
       console.log(`      [${i + 1}] date="${n.date}" title="${n.title.substring(0, 40)}"`);
     });
 
-    // ═══ 仅保留当天新闻 ═══
-    const now = new Date();
-    const todayFormats = [
-      `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`,
-      `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`,
+    // ═══ 仅保留上一个自然日的新闻 ═══
+    const yesterday = new Date(Date.now() - 86400000);
+    const dateFormats = [
+      `${yesterday.getFullYear()}年${yesterday.getMonth() + 1}月${yesterday.getDate()}日`,
+      `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`,
     ];
     listItems = listItems.filter((n) => {
       if (!n.date) return true; // 没有日期的保留（避免误杀）
-      return todayFormats.some((fmt) => n.date.includes(fmt));
+      return dateFormats.some((fmt) => n.date.includes(fmt));
     });
-    console.log(`   📅 当天过滤后: ${listItems.length} 条 (${todayFormats[0]})`);
+    console.log(`   📅 昨日过滤后: ${listItems.length} 条 (${dateFormats[0]})`);
 
     // ═══ 逐篇抓取正文内容 ═══
     console.log(`\n📰 开始抓取正文内容 (共 ${listItems.length} 篇)...`);
