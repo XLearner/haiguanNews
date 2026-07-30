@@ -345,7 +345,7 @@ async function batchCreateRecords(records) {
   for (let i = 0; i < records.length; i += BATCH_SIZE) {
     const batch = records.slice(i, i + BATCH_SIZE);
     const body = {
-      records: batch.map((r) => ({
+      records: batch.map((r) => {
         // 日期字符串 → 毫秒时间戳（飞书 DateTime 字段要求）
         let dateTs = 0;
         if (r.date) {
@@ -354,14 +354,16 @@ async function batchCreateRecords(records) {
           dateTs = Number.isNaN(parsed) ? 0 : parsed;
         }
 
-        fields: {
-          ...(dateTs ? { 时间: dateTs } : {}),
+        const fields = {
           标题: r.title,
           来源: "海关总署",
           内容: r.content || "",
           摘要: r.url,
-        },
-      })),
+        };
+        if (dateTs) fields["时间"] = dateTs;
+
+        return { fields };
+      }),
     };
 
     await feishuApi(
