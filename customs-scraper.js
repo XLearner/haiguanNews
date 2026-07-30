@@ -166,10 +166,23 @@ async function scrapeNewsList() {
     // 额外缓冲
     await page.waitForTimeout(2000);
 
-    // 第三步：检查是否成功
-    const finalUrl = page.url();
-    const html = await page.content();
-    const bodyText = await page.evaluate(() => document.body.innerText || "");
+    // 第三步：再等一下确保页面完全稳定
+    await page.waitForTimeout(2000);
+
+    // 安全获取内容（页面可能在导航）
+    let finalUrl, html, bodyText;
+    try {
+      finalUrl = page.url();
+      html = await page.content();
+    } catch (e) {
+      console.log(`   ⚠️ 页面仍在加载，等待...`);
+      await page.waitForLoadState("load", { timeout: 15000 }).catch(() => {});
+      await page.waitForTimeout(1000);
+      finalUrl = page.url();
+      html = await page.content();
+    }
+
+    bodyText = await page.evaluate(() => document.body?.innerText || "");
     console.log(`   最终 URL: ${finalUrl}`);
     console.log(`   HTML 长度: ${html.length} 字符`);
     console.log(`   可见文本: ${bodyText.length} 字符`);
